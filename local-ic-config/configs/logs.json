@@ -1,0 +1,24 @@
+{
+  "start_time": 1736706222,
+  "chains": [
+    {
+      "chain_id": "localjuno-1",
+      "chain_name": "localjuno-1",
+      "rpc_address": "http://0.0.0.0:26057",
+      "rest_address": "http://0.0.0.0:1318",
+      "grpc_address": "0.0.0.0:9091",
+      "p2p_address": "0.0.0.0:26056",
+      "ibc_paths": []
+    },
+    {
+      "chain_id": "localxion-1",
+      "chain_name": "localxion-1",
+      "rpc_address": "http://0.0.0.0:26157",
+      "rest_address": "http://0.0.0.0:1319",
+      "grpc_address": "0.0.0.0:9092",
+      "p2p_address": "0.0.0.0:26156",
+      "ibc_paths": []
+    }
+  ],
+  "ibc_channels": []
+}

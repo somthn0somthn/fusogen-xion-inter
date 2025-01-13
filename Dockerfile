@@ -63,12 +63,3 @@ EXPOSE 1317 26656 26657 9090
 # Default command just runs xiond
 CMD ["/usr/bin/xiond"]
 
-##CONT move on with polytone workshop
-
-################OLD NOTES#############
-
-
-##Try an ubuntu based buil
-
-##Maybe I need to take a step back and review what local-ic needs and why it
-##seems to be incompatible with XION Dockerfile
