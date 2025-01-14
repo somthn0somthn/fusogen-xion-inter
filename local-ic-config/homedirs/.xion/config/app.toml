@@ -5,38 +5,48 @@
 ###                           Base Configuration                            ###
 ###############################################################################
 
-# The minimum gas prices a validator is willing to accept for processing
-# a transaction. This can be 0 or near-zero in dev for frictionless testing.
+# The minimum gas prices a validator is willing to accept for processing a
+# transaction. A transaction's fees must meet the minimum of any denomination
+# specified in this config (e.g. 0.25token1,0.0001token2).
 minimum-gas-prices = "0uxion"
 
-# How many states to prune. "default" = keep ~362,880 blocks,
-# "everything" = keep only 2 blocks, "nothing" = full archive,
-# or "custom" for your own pruning strategy. For local dev, "default" is fine.
+# default: the last 362880 states are kept, pruning at 10 block intervals
+# nothing: all historic states will be saved, nothing will be deleted (i.e. archiving node)
+# everything: 2 latest states will be kept; pruning at 10 block intervals.
+# custom: allow pruning options to be manually specified through 'pruning-keep-recent', and 'pruning-interval'
 pruning = "default"
 
+# These are applied if and only if the pruning strategy is custom.
 pruning-keep-recent = "0"
 pruning-interval = "0"
 
-# If you want your chain to stop at a certain block/time for testing, set below:
+# HaltHeight contains a non-zero block height at which a node will gracefully
+# halt and shutdown that can be used to assist upgrades and testing.
 halt-height = 0
+
+# HaltTime contains a non-zero minimum block time (in Unix seconds) at which
+# a node will gracefully halt and shutdown that can be used to assist upgrades
+# and testing.
 halt-time = 0
 
-# 0 means not pruning older blocks from Tendermint beyond the unbonding window.
+# MinRetainBlocks defines the minimum block height offset from the current
+# block being committed, such that all blocks past this offset are pruned
 min-retain-blocks = 0
 
-# Speeds up repeated queries by caching interim states. Usually "true".
+# InterBlockCache enables inter-block caching.
 inter-block-cache = true
 
-# Which events get indexed for transaction/event queries. Usually empty array for dev.
+# IndexEvents defines the set of events in the form {eventType}.{attributeKey},
+# which informs Tendermint what to index. If empty, all events will be indexed.
 index-events = []
 
-# iavl-cache-size is the number of IAVL nodes to keep in memory for performance.
+# IavlCacheSize set the size of the iavl tree cache (in number of nodes).
 iavl-cache-size = 781250
 
-# Whether to enable fast node indexing in IAVL. Typically "false".
+# IAVLDisableFastNode enables or disables the fast node feature of IAVL. 
 iavl-disable-fastnode = false
 
-# Database backend for the application and snapshots. Usually an empty string for fallback.
+# AppDBBackend defines the database backend type to use for the application and snapshots DBs.
 app-db-backend = ""
 
 ###############################################################################
@@ -44,13 +54,13 @@ app-db-backend = ""
 ###############################################################################
 
 [telemetry]
+service-name = ""
 enabled = false
 enable-hostname = false
 enable-hostname-label = false
 enable-service-label = false
 prometheus-retention-time = 0
 global-labels = []
-service-name = ""
 
 ###############################################################################
 ###                           API Configuration                             ###
@@ -82,6 +92,8 @@ max-send-msg-size = "2147483647"
 
 [grpc-web]
 enable = true
+address = "localhost:9092"
+enable-unsafe-cors = false
 
 ###############################################################################
 ###                        State Sync Configuration                         ###
@@ -92,23 +104,30 @@ snapshot-interval = 0
 snapshot-keep-recent = 2
 
 ###############################################################################
-###                              State Streaming                            ###
+###                         Store / State Streaming                         ###
 ###############################################################################
 
-[streaming]
-[streaming.abci]
-keys = []
-plugin = ""
-stop-node-on-err = true
+[store]
+streamers = []
+
+[streamers]
+[streamers.file]
+keys = ["*", ]
+write_dir = ""
+prefix = ""
+
+output-metadata = "true"
+stop-node-on-error = "true"
+fsync = "false"
 
 ###############################################################################
 ###                         Mempool                                         ###
 ###############################################################################
 
 [mempool]
-# Negative 1 (-1) disables adding transactions to the mempool, 
-# which is usually not what you want unless debugging. 
-# Typically set to a positive number or 0 for "no limit".
+# Setting max-txs to 0 will allow for a unbounded amount of transactions in the mempool.
+# Setting max_txs to negative 1 (-1) will disable transactions from being inserted into the mempool.
+# Setting max_txs to a positive number (> 0) will limit the number of transactions in the mempool.
 max-txs = 5000
 
 ###############################################################################
@@ -119,4 +138,3 @@ max-txs = 5000
 query_gas_limit = 3000000
 memory_cache_size = 100
 # simulation_gas_limit =
-

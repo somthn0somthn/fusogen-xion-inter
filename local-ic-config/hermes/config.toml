@@ -58,14 +58,14 @@ trust_threshold = "1/3"
 address_type = { derivation = "cosmos" }
 
 [[chains]]
-id = "localcosmoshub-1"
+id = "localxion-1"
 type = "CosmosSdk"
 rpc_addr = "http://127.0.0.1:26157"
 grpc_addr = "http://127.0.0.1:9092"
 event_source = { mode = "push", url = "ws://127.0.0.1:26157/websocket", batch_delay = "500ms" }
 rpc_timeout = "10s"
 trusted_node = false
-account_prefix = "cosmos"
+account_prefix = "xion"
 key_name = "relayer_key_chain2"
 key_store_type = "Test"
 store_prefix = "ibc"
@@ -80,7 +80,7 @@ max_block_time = "30s"
 ccv_consumer_chain = false
 memo_prefix = ""
 sequential_batch_tx = false
-gas_price = { price = 1, denom = "uatomx" }
+gas_price = { price = 1, denom = "uxion" }
 trust_threshold = "1/3"
 address_type = { derivation = "cosmos" }
 

@@ -1,44 +1,35 @@
 # This is a TOML config file.
+# For more information, see https://github.com/toml-lang/toml
 
 ###############################################################################
-###                           Client Configuration                           ###
+###                           Client Configuration                          ###
 ###############################################################################
 
 # The network chain ID
-chain-id = "localxion-1"
-
+chain-id = "localjuno-1"
 # The keyring's backend, where the keys are stored (os|file|kwallet|pass|test|memory)
 keyring-backend = "test"
-
 # CLI output format (text|json)
 output = "text"
-
-# <host>:<port> to CometBFT RPC interface for this chain
-# (In your juno_hub_custom.json, you mapped 26657 -> 26157 for Xion, so point the CLI to 127.0.0.1:26157)
-node = "tcp://127.0.0.1:26157"
-
+# <host>:<port> to Tendermint RPC interface for this chain
+node = "tcp://127.0.0.1:26057"
 # Transaction broadcasting mode (sync|async|block)
 broadcast-mode = "sync"
 
-
 ###############################################################################
-###                       Xion Tx Configuration                              ###
+###                          Juno Tx Configuration                          ###
 ###############################################################################
 
 # Amount of gas per transaction
 gas = "auto"
-
-# Price per unit of gas (ex: 0.005uxion)
-gas-prices = "0.01uxion"
-
-# Multiply estimated gas by this factor
+# Price per unit of gas (ex: 0.005ujuno)
+gas-prices = "0.01ujunox"
 gas-adjustment = "2"
 
-# If you prefer to hard-code fees instead of auto gas prices:
+# Fees to use instead of set gas prices
 fees = ""
-
 fee-granter = ""
 fee-payer = ""
 
-# Optional memo to include in your Transactions
+# Memo to include in your Transactions
 note = ""
