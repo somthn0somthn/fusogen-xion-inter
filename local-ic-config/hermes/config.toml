@@ -35,7 +35,8 @@ id = "localjuno-1"
 type = "CosmosSdk"
 rpc_addr = "http://127.0.0.1:26057"
 grpc_addr = "http://127.0.0.1:9091"
-event_source = { mode = "push", url = "ws://127.0.0.1:26057/websocket", batch_delay = "500ms" }
+#event_source = { mode = "push", url = "ws://127.0.0.1:26057/websocket", batch_delay = "200ms" }
+event_source = { mode = "pull", interval = "1s" }
 rpc_timeout = "10s"
 trusted_node = false
 account_prefix = "juno"
@@ -62,7 +63,8 @@ id = "localxion-1"
 type = "CosmosSdk"
 rpc_addr = "http://127.0.0.1:26157"
 grpc_addr = "http://127.0.0.1:9092"
-event_source = { mode = "push", url = "ws://127.0.0.1:26157/websocket", batch_delay = "500ms" }
+#event_source = { mode = "push", url = "ws://127.0.0.1:26157/websocket", batch_delay = "200ms" }
+event_source = { mode = "pull", interval = "1s" }
 rpc_timeout = "10s"
 trusted_node = false
 account_prefix = "xion"
