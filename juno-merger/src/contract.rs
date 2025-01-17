@@ -1,9 +1,11 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::{
-    entry_point, from_json, to_binary, to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env,
+    entry_point, from_json, to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env,
     MessageInfo, Response, StdError, StdResult, SubMsg, Uint128, Uint64, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
+use base64;
+use serde_json::json;
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, PolytoneExecuteMsg, QueryMsg, ReceiveMsg};
@@ -20,7 +22,7 @@ pub fn instantiate(
         note_contract: deps.api.addr_validate(&msg.note_contract)?,
         token_a: deps.api.addr_validate(&msg.token_a)?,
         token_b: deps.api.addr_validate(&msg.token_b)?,
-        xion_mint_contract: deps.api.addr_validate(&msg.xion_mint_contract)?,
+        xion_mint_contract: msg.xion_mint_contract.clone(),
     };
 
     CONFIG.save(deps.storage, &config)?;
@@ -47,48 +49,56 @@ pub fn execute(
 
 pub fn receive_cw20(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     cw20_msg: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
-    // Only accept from token_a or token_b
     if info.sender != config.token_a && info.sender != config.token_b {
         return Err(ContractError::InvalidToken {});
     }
 
-    // Parse the user-provided hook (Lock { xion_meta_account })
     let hook: ReceiveMsg = from_json(&cw20_msg.msg)?;
 
     match hook {
         ReceiveMsg::Lock { xion_meta_account } => {
-            // Prepare the cw20 Mint on Xion
-            let mint_msg = Cw20ExecuteMsg::Mint {
-                recipient: xion_meta_account.clone(),
-                amount: cw20_msg.amount,
-            };
+            // Format the mint message and base64 encode it
+            let msg_str = format!(
+                r#"{{"mint":{{"recipient":"{}","amount":"{}"}}}}"#,
+                xion_meta_account, cw20_msg.amount
+            );
+            let base64_msg = base64::encode(msg_str);
 
-            // Wrap that in a PolytoneExecuteMsg
-            let polytone_msg = PolytoneExecuteMsg::Execute {
-                msgs: vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: config.xion_mint_contract.to_string(),
-                    msg: to_binary(&mint_msg)?,
-                    funds: vec![],
-                })],
-                callback: None,
-                timeout_seconds: 300u64.into(),
-            };
-
-            // Submessage to the local Polytone note
-            let note_submsg = SubMsg::new(WasmMsg::Execute {
-                contract_addr: config.note_contract.to_string(),
-                msg: to_binary(&polytone_msg)?,
-                funds: vec![],
+            // Create the polytone message exactly like the workshop
+            let execute_msg = json!({
+                "execute": {
+                    "msgs": [{
+                        "wasm": {
+                            "execute": {
+                                "contract_addr": config.xion_mint_contract,
+                                "msg": base64_msg,
+                                "funds": []
+                            }
+                        }
+                    }],
+                    "callback": {
+                        "receiver": env.contract.address.to_string(),
+                        "msg": base64::encode("mint_complete")
+                    },
+                    "timeout_seconds": "300"
+                }
             });
 
+            // Send to note contract
+            let note_msg = WasmMsg::Execute {
+                contract_addr: config.note_contract.to_string(),
+                msg: to_json_binary(&execute_msg)?,
+                funds: vec![],
+            };
+
             Ok(Response::new()
-                .add_submessage(note_submsg)
+                .add_message(note_msg)
                 .add_attribute("action", "lock_and_mint")
                 .add_attribute("locked_token", info.sender)
                 .add_attribute("from_user", cw20_msg.sender)
@@ -113,10 +123,6 @@ mod tests {
     use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor, IntoAddr};
 
     use crate::ContractError;
-
-
-    // Minimal contract that can decode PolytoneExecuteMsg::Execute
-    // and do nothing but log an event.
 
     #[cfg(not(feature = "library"))]
     use cosmwasm_std::entry_point;
@@ -146,7 +152,6 @@ mod tests {
                 callback,
                 timeout_seconds,
             } => {
-                // Just log that we received the cross-chain message
                 Ok(cosmwasm_std::Response::new()
                     .add_attribute("mock_note", "received_execute")
                     .add_attribute("caller", info.sender.to_string())
@@ -163,7 +168,6 @@ mod tests {
         _env: cosmwasm_std::Env,
         _msg: cosmwasm_std::Binary,
     ) -> Result<cosmwasm_std::Binary, cosmwasm_std::StdError> {
-
         Ok(to_binary("no queries")?)
     }
 
@@ -305,6 +309,7 @@ mod tests {
             .execute_contract(user.clone(), token_a_addr.clone(), &send_msg, &[])
             .unwrap();
 
+        // 3) Check for expected events
         let wasm_events: Vec<_> = res.events.iter().filter(|e| e.ty == "wasm").collect();
         assert!(wasm_events.len() >= 2, "Expected at least 2 wasm events");
 
@@ -330,6 +335,5 @@ mod tests {
             .find(|at| at.key == "mock_note")
             .unwrap();
         assert_eq!(mock_note_attr.value, "received_execute");
-
     }
 }

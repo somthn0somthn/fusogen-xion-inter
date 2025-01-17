@@ -8,7 +8,7 @@ pub struct Config {
     pub note_contract: Addr,      
     pub token_a: Addr,           
     pub token_b: Addr,           
-    pub xion_mint_contract: Addr, 
+    pub xion_mint_contract: String, 
 }
 
 pub const CONFIG: Item<Config> = Item::new("config");
