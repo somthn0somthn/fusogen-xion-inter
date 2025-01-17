@@ -1,110 +1,36 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::{
-    entry_point, to_json_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response,
-    StdResult, SubMsg, Uint128, WasmMsg,
+    entry_point, from_json, to_binary, to_json_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env,
+    MessageInfo, Response, StdError, StdResult, SubMsg, Uint128, Uint64, WasmMsg,
 };
-
-use cw2::set_contract_version;
-use cw20; // Add this for MinterResponse
-use cw20_base; // Add this for InstantiateMsg
+use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 
 use crate::error::ContractError;
-use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{Config, CONFIG, WHITELIST}; // TODO: do i need to instantiate this in the instantiated fun
-
-// version info for migration info
-const CONTRACT_NAME: &str = "crates.io:whitelist-cw20";
-const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-pub const INSTANTIATE_TOKEN_REPLY_ID: u64 = 1; //I think this effectively functions as an enum
-                                               //pub const CW20_ID: u64 = 42; //TODO move this to a .env file
+use crate::msg::{ExecuteMsg, InstantiateMsg, PolytoneExecuteMsg, QueryMsg, ReceiveMsg};
+use crate::state::{Config, CONFIG};
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
-    env: Env,
+    _env: Env,
     _info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
-    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-
-    let admin = deps.api.addr_validate(&msg.admin)?;
-
-    //this calls a separate contract hence why you have to make
-    //a separate InstantiateMsg call
-    let cw20_msg = cw20_base::msg::InstantiateMsg {
-        //TODO : pull these out into variables
-        name: msg.token_name,
-        symbol: msg.token_symbol,
-        decimals: msg.token_decimals,
-        initial_balances: vec![],
-        mint: Some(cw20::MinterResponse {
-            minter: env.contract.address.to_string(),
-            cap: None,
-        }),
-        marketing: None,
+    let config = Config {
+        note_contract: deps.api.addr_validate(&msg.note_contract)?,
+        token_a: deps.api.addr_validate(&msg.token_a)?,
+        token_b: deps.api.addr_validate(&msg.token_b)?,
+        xion_mint_contract: deps.api.addr_validate(&msg.xion_mint_contract)?,
     };
 
-    let instantiate_msg = WasmMsg::Instantiate {
-        admin: Some(msg.admin.clone()), //TODO :: do I want admin priveliges here
-        code_id: msg.token_code_id,
-        msg: to_json_binary(&cw20_msg)?,
-        funds: vec![],
-        label: "factory token creation".to_owned(),
-    };
-
-    let instantiate_token_submsg =
-        SubMsg::reply_on_success(instantiate_msg, INSTANTIATE_TOKEN_REPLY_ID);
-
-    CONFIG.save(
-        deps.storage,
-        &Config {
-            admin,
-            token_contract: None,
-        },
-    )?;
+    CONFIG.save(deps.storage, &config)?;
 
     Ok(Response::new()
-        .add_submessage(instantiate_token_submsg)
         .add_attribute("action", "instantiate")
-        .add_attribute("admin", msg.admin))
-}
-
-#[cfg_attr(not(feature = "library"), entry_point)]
-pub fn reply(deps: DepsMut, _env: Env, msg: Reply) -> Result<Response, ContractError> {
-    match msg.id {
-        INSTANTIATE_TOKEN_REPLY_ID => handle_instantiate_token_reply(deps, msg),
-        _ => Ok(Response::default()),
-    }
-}
-
-fn handle_instantiate_token_reply(deps: DepsMut, msg: Reply) -> Result<Response, ContractError> {
-    if let Some(res) = msg.result.into_result().ok() {
-        let contract_address = res
-            .events
-            .iter()
-            .find(|e| e.ty == "instantiate")
-            .and_then(|e| {
-                e.attributes
-                    .iter()
-                    .find(|attr| attr.key == "_contract_address")
-            })
-            .map(|attr| attr.value.clone())
-            .ok_or_else(|| ContractError::NoContractAddress {})?;
-
-        let validated_addr = deps.api.addr_validate(&contract_address)?;
-        let mut config = CONFIG.load(deps.storage)?;
-
-        config.token_contract = Some(validated_addr.clone());
-
-        CONFIG.save(deps.storage, &config)?;
-
-        return Ok(Response::new()
-            .add_attribute("method", "handle_cw20_instantiate_reply")
-            .add_attribute("cw20_contract_addr", contract_address));
-    }
-
-    Ok(Response::new().add_attribute("action", "handle_instantiate_token_reply"))
+        .add_attribute("token_a", msg.token_a)
+        .add_attribute("token_b", msg.token_b)
+        .add_attribute("note_contract", msg.note_contract)
+        .add_attribute("xion_mint_contract", msg.xion_mint_contract))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -115,130 +41,144 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::AddToWhiteList { address } => add_to_whitelist(deps, env, info, address),
-        ExecuteMsg::RemoveFromWhiteList { address } => {
-            remove_from_whitelist(deps, env, info, address)
-        }
-        ExecuteMsg::Mint { amount, recipient } => mint_tokens(deps, env, info, amount, recipient),
+        ExecuteMsg::Receive(cw20_receive) => receive_cw20(deps, env, info, cw20_receive),
     }
 }
 
-fn add_to_whitelist(
+pub fn receive_cw20(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    address: String,
+    cw20_msg: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
-    if info.sender != config.admin {
-        return Err(ContractError::Unauthorized {});
+
+    // Only accept from token_a or token_b
+    if info.sender != config.token_a && info.sender != config.token_b {
+        return Err(ContractError::InvalidToken {});
     }
 
-    let addr = deps.api.addr_validate(&address)?;
-    WHITELIST.save(deps.storage, &addr, &())?;
+    // Parse the user-provided hook (Lock { xion_meta_account })
+    let hook: ReceiveMsg = from_json(&cw20_msg.msg)?;
 
-    Ok(Response::new()
-        .add_attribute("action", "add_to_whitelist")
-        .add_attribute("whitelist_addr", addr))
-}
+    match hook {
+        ReceiveMsg::Lock { xion_meta_account } => {
+            // Prepare the cw20 Mint on Xion
+            let mint_msg = Cw20ExecuteMsg::Mint {
+                recipient: xion_meta_account.clone(),
+                amount: cw20_msg.amount,
+            };
 
-fn remove_from_whitelist(
-    deps: DepsMut,
-    _env: Env,
-    info: MessageInfo,
-    address: String,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    if info.sender != config.admin {
-        return Err(ContractError::Unauthorized {});
-    }
+            // Wrap that in a PolytoneExecuteMsg
+            let polytone_msg = PolytoneExecuteMsg::Execute {
+                msgs: vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: config.xion_mint_contract.to_string(),
+                    msg: to_binary(&mint_msg)?,
+                    funds: vec![],
+                })],
+                callback: None,
+                timeout_seconds: 300u64.into(),
+            };
 
-    let addr = deps.api.addr_validate(&address)?;
+            // Submessage to the local Polytone note
+            let note_submsg = SubMsg::new(WasmMsg::Execute {
+                contract_addr: config.note_contract.to_string(),
+                msg: to_binary(&polytone_msg)?,
+                funds: vec![],
+            });
 
-    WHITELIST.remove(deps.storage, &addr);
-
-    Ok(Response::new()
-        .add_attribute("action", "remove_from_whitelist")
-        .add_attribute("whitelist_addr", addr))
-}
-
-fn mint_tokens(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    amount: Uint128,
-    recipient: Option<String>,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-    let token_addr = config
-        .token_contract
-        .ok_or(ContractError::NoContractAddress {})?;
-
-    if info.sender != config.admin {
-        let is_whitelisted = WHITELIST.may_load(deps.storage, &info.sender)?.is_some();
-        if !is_whitelisted {
-            return Err(ContractError::Unauthorized {});
+            Ok(Response::new()
+                .add_submessage(note_submsg)
+                .add_attribute("action", "lock_and_mint")
+                .add_attribute("locked_token", info.sender)
+                .add_attribute("from_user", cw20_msg.sender)
+                .add_attribute("amount_locked", cw20_msg.amount)
+                .add_attribute("xion_recipient", xion_meta_account))
         }
     }
-
-    let final_recipient = match recipient {
-        //TODO : validate address
-        Some(addr) => deps.api.addr_validate(&addr)?,
-        None => deps.api.addr_validate(&info.sender.to_string())?,
-    };
-
-    let cw20_mint_msg = cw20::Cw20ExecuteMsg::Mint {
-        recipient: final_recipient.to_string(),
-        amount,
-    };
-
-    let wasm_msg = cosmwasm_std::WasmMsg::Execute {
-        contract_addr: token_addr.to_string(),
-        msg: to_json_binary(&cw20_mint_msg)?,
-        funds: vec![],
-    };
-
-    Ok(Response::new()
-        .add_message(cosmwasm_std::CosmosMsg::Wasm(wasm_msg))
-        .add_attribute("action", "mint_tokens")
-        .add_attribute("sender", info.sender.to_string())
-        .add_attribute("final_recipient", final_recipient)
-        .add_attribute("amount", amount))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetConfig {} => {
-            let config = CONFIG.load(deps.storage)?;
-            to_json_binary(&ConfigResponse {
-                admin: config.admin.into_string(),
-                token_contract: config.token_contract.map(|a| a.into_string()),
-            })
-        }
-        QueryMsg::IsWhitelisted { address } => {
-            let addr = deps.api.addr_validate(&address)?;
-            let is_whitelisted = WHITELIST.may_load(deps.storage, &addr)?.is_some();
-            to_json_binary(&is_whitelisted)
-        }
+        QueryMsg::GetConfig {} => to_json_binary(&CONFIG.load(deps.storage)?),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::{Addr, Empty};
-    use cw20_base::contract;
+    use cosmwasm_std::{to_binary, Empty, Uint128};
+    use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
     use cw_multi_test::{App, AppBuilder, Contract, ContractWrapper, Executor, IntoAddr};
-    use serde::de::value::MapAccessDeserializer;
 
-    fn contract_whitelist_cw20() -> Box<dyn Contract<Empty>> {
-        let contract = ContractWrapper::new(execute, instantiate, query).with_reply(reply);
+    use crate::ContractError;
 
+
+    // Minimal contract that can decode PolytoneExecuteMsg::Execute
+    // and do nothing but log an event.
+
+    #[cfg(not(feature = "library"))]
+    use cosmwasm_std::entry_point;
+
+    use crate::msg::PolytoneExecuteMsg as MockNoteMsg;
+
+    #[cfg_attr(not(feature = "library"), entry_point)]
+    pub fn mock_note_instantiate(
+        _deps: cosmwasm_std::DepsMut,
+        _env: cosmwasm_std::Env,
+        _info: cosmwasm_std::MessageInfo,
+        _msg: Empty,
+    ) -> Result<cosmwasm_std::Response, cosmwasm_std::StdError> {
+        Ok(cosmwasm_std::Response::new().add_attribute("mock_note", "init"))
+    }
+
+    #[cfg_attr(not(feature = "library"), entry_point)]
+    pub fn mock_note_execute(
+        _deps: cosmwasm_std::DepsMut,
+        _env: cosmwasm_std::Env,
+        info: cosmwasm_std::MessageInfo,
+        msg: MockNoteMsg,
+    ) -> Result<cosmwasm_std::Response, cosmwasm_std::StdError> {
+        match msg {
+            MockNoteMsg::Execute {
+                msgs,
+                callback,
+                timeout_seconds,
+            } => {
+                // Just log that we received the cross-chain message
+                Ok(cosmwasm_std::Response::new()
+                    .add_attribute("mock_note", "received_execute")
+                    .add_attribute("caller", info.sender.to_string())
+                    .add_attribute("msgs_len", msgs.len().to_string())
+                    .add_attribute("timeout_seconds", timeout_seconds.to_string())
+                    .add_attribute("callback", format!("{:?}", callback)))
+            }
+        }
+    }
+
+    #[cfg_attr(not(feature = "library"), entry_point)]
+    pub fn mock_note_query(
+        _deps: cosmwasm_std::Deps<cosmwasm_std::Empty>,
+        _env: cosmwasm_std::Env,
+        _msg: cosmwasm_std::Binary,
+    ) -> Result<cosmwasm_std::Binary, cosmwasm_std::StdError> {
+
+        Ok(to_binary("no queries")?)
+    }
+
+    fn mock_note_contract() -> Box<dyn Contract<Empty>> {
+        let contract =
+            ContractWrapper::new(mock_note_execute, mock_note_instantiate, mock_note_query);
         Box::new(contract)
     }
 
-    fn contract_cw20_base() -> Box<dyn Contract<Empty>> {
+    fn merger_contract() -> Box<dyn Contract<Empty>> {
+        let contract = ContractWrapper::new(execute, instantiate, query);
+        Box::new(contract)
+    }
+
+    fn cw20_base_contract() -> Box<dyn Contract<Empty>> {
         let contract = ContractWrapper::new(
             cw20_base::contract::execute,
             cw20_base::contract::instantiate,
@@ -247,154 +187,149 @@ mod tests {
         Box::new(contract)
     }
 
-    fn setup_app() -> (App, Addr, Addr, u64) {
+    fn setup() -> (
+        App,
+        Addr, 
+        Addr, 
+        Addr, 
+        Addr, 
+    ) {
         let mut app = App::default();
 
-        let cw20_code_id = app.store_code(contract_cw20_base());
-        let factory_code_id = app.store_code(contract_whitelist_cw20());
+        let cw20_code_id = app.store_code(cw20_base_contract());
+        let merger_code_id = app.store_code(merger_contract());
+        let note_code_id = app.store_code(mock_note_contract());
 
-        let admin = "the_admin".into_addr();
-
-        let factory_init_msg = InstantiateMsg {
-            admin: admin.clone().to_string(),
-            token_name: "the token name".to_string(),
-            token_symbol: "TKNSYBL".to_string(),
-            token_decimals: 6,
-            token_code_id: cw20_code_id, //TODO :: is this rigth
-        };
-
-        let factory_addr = app
+        // instantiate the mock note
+        let note_addr = app
             .instantiate_contract(
-                factory_code_id,
-                admin.clone(),
-                &factory_init_msg,
+                note_code_id,
+                "note_deployer".into_addr(),
+                &Empty {}, 
                 &[],
-                "My Factory",
+                "Mock Note",
                 None,
             )
             .unwrap();
 
-        (app, admin, factory_addr, cw20_code_id)
+        // instantiate Token A
+        let token_a_admin = "token_a_admin".into_addr();
+        let token_a_init = cw20_base::msg::InstantiateMsg {
+            name: "Token A".into(),
+            symbol: "TKNA".into(),
+            decimals: 6,
+            initial_balances: vec![],
+            mint: Some(cw20::MinterResponse {
+                minter: token_a_admin.to_string(),
+                cap: None,
+            }),
+            marketing: None,
+        };
+        let token_a_addr = app
+            .instantiate_contract(
+                cw20_code_id,
+                token_a_admin.clone(),
+                &token_a_init,
+                &[],
+                "Token A",
+                None,
+            )
+            .unwrap();
+
+        let xion_mint_addr = token_a_addr.clone();
+
+        // instantiate the Merger
+        let placeholder = "placeholder".into_addr();
+        let init_msg = InstantiateMsg {
+            note_contract: note_addr.to_string(),
+            token_a: token_a_addr.to_string(),
+            token_b: placeholder.to_string(),
+            xion_mint_contract: xion_mint_addr.to_string(),
+        };
+        let merger_addr = app
+            .instantiate_contract(
+                merger_code_id,
+                "merger_deployer".into_addr(),
+                &init_msg,
+                &[],
+                "Merger Contract",
+                None,
+            )
+            .unwrap();
+
+        (app, merger_addr, token_a_addr, note_addr, token_a_admin)
     }
 
     #[test]
-    fn test_factory_instantiates_cw20() {
-        let (mut app, admin, factory_addr, _) = setup_app();
-     
-        let config_resp: ConfigResponse = app
+    fn test_init() {
+        let (app, merger_addr, token_a_addr, note_addr, _) = setup();
+
+        let cfg: super::Config = app
             .wrap()
-            .query_wasm_smart(&factory_addr, &QueryMsg::GetConfig {})
+            .query_wasm_smart(merger_addr, &QueryMsg::GetConfig {})
             .unwrap();
 
-        assert_eq!(config_resp.admin, admin.clone().to_string());
-
-        let cw20_addr = config_resp.token_contract.expect("No Contract address set");
-
-        let token_info: cw20::TokenInfoResponse = app
-            .wrap()
-            .query_wasm_smart(&cw20_addr, &cw20::Cw20QueryMsg::TokenInfo {})
-            .unwrap();
-        //TODO :: pull these strings out into variables
-        assert_eq!(token_info.name, "the token name");
-        assert_eq!(token_info.symbol, "TKNSYBL");
-        assert_eq!(token_info.decimals, 6);
+        assert_eq!(cfg.token_a, token_a_addr);
+        assert_eq!(cfg.note_contract, note_addr);
     }
 
     #[test]
-    fn test_add_and_remove_whitelist() {
-        let (mut app, admin, factory_addr, _) = setup_app();
+    fn test_receive_lock() {
+        let (mut app, merger_addr, token_a_addr, _note_addr, token_a_admin) = setup();
 
+        // 1) Mint some "TokenA" for a user
         let user = "user1".into_addr();
+        let amount = Uint128::new(500);
+        app.execute_contract(
+            token_a_admin,
+            token_a_addr.clone(),
+            &Cw20ExecuteMsg::Mint {
+                recipient: user.to_string(),
+                amount,
+            },
+            &[],
+        )
+        .unwrap();
 
-        let add_msg = ExecuteMsg::AddToWhiteList {
-            address: user.to_string(),
+        // 2) user sends token_a to the merger
+        let lock_msg = ReceiveMsg::Lock {
+            xion_meta_account: "xion1xyz".to_string(),
         };
-        app.execute_contract(admin.clone(), factory_addr.clone(), &add_msg, &[])
-            .unwrap();
-
-        let is_whitelisted: bool = app
-            .wrap()
-            .query_wasm_smart(
-                &factory_addr,
-                &QueryMsg::IsWhitelisted {
-                    address: user.to_string(),
-                },
-            )
-            .unwrap();
-        assert!(is_whitelisted);
-
-        let remove_msg = ExecuteMsg::RemoveFromWhiteList {
-            address: user.to_string(),
+        let send_msg = Cw20ExecuteMsg::Send {
+            contract: merger_addr.to_string(),
+            amount,
+            msg: to_binary(&lock_msg).unwrap(),
         };
-        app.execute_contract(admin.clone(), factory_addr.clone(), &remove_msg, &[])
+
+        let res = app
+            .execute_contract(user.clone(), token_a_addr.clone(), &send_msg, &[])
             .unwrap();
 
-        let is_whitelisted: bool = app
-            .wrap()
-            .query_wasm_smart(
-                &factory_addr,
-                &QueryMsg::IsWhitelisted {
-                    address: user.to_string(),
-                },
-            )
+        let wasm_events: Vec<_> = res.events.iter().filter(|e| e.ty == "wasm").collect();
+        assert!(wasm_events.len() >= 2, "Expected at least 2 wasm events");
+
+        let found_lock_and_mint = wasm_events.iter().any(|ev| {
+            ev.attributes
+                .iter()
+                .any(|attr| attr.key == "action" && attr.value == "lock_and_mint")
+        });
+        assert!(
+            found_lock_and_mint,
+            "No lock_and_mint action found in events"
+        );
+
+        let mock_note_evt = res
+            .events
+            .iter()
+            .find(|ev| ev.attributes.iter().any(|at| at.key == "mock_note"))
+            .expect("mock note should have been called");
+
+        let mock_note_attr = mock_note_evt
+            .attributes
+            .iter()
+            .find(|at| at.key == "mock_note")
             .unwrap();
-        assert!(!is_whitelisted);
-    }
+        assert_eq!(mock_note_attr.value, "received_execute");
 
-    #[test]
-    fn test_mint_tokens() {
-        let (mut app, admin, factory_addr, _) = setup_app();
-
-        let recipient = "recipient1".into_addr();
-
-        let add_msg = ExecuteMsg::AddToWhiteList {
-            address: recipient.to_string(),
-        };
-        app.execute_contract(admin.clone(), factory_addr.clone(), &add_msg, &[])
-            .unwrap();
-
-        let mint_msg = ExecuteMsg::Mint {
-            amount: Uint128::new(1000),
-            recipient: Some(recipient.to_string()),
-        };
-        app.execute_contract(admin.clone(), factory_addr.clone(), &mint_msg, &[])
-            .unwrap();
-
-        let config_resp: ConfigResponse = app
-            .wrap()
-            .query_wasm_smart(&factory_addr, &QueryMsg::GetConfig {})
-            .unwrap();
-
-        let cw20_addr = config_resp.token_contract.expect("No Contract address set");
-
-        let balance: cw20::BalanceResponse = app
-            .wrap()
-            .query_wasm_smart(
-                &cw20_addr,
-                &cw20::Cw20QueryMsg::Balance {
-                    address: recipient.to_string(),
-                },
-            )
-            .unwrap();
-        assert_eq!(balance.balance, Uint128::new(1000));
-
-        let mint_msg2 = ExecuteMsg::Mint {
-            amount: Uint128::new(234),
-            recipient: None,
-        };
-        app.execute_contract(recipient.clone(), factory_addr.clone(), &mint_msg2, &[])
-            .unwrap();
-
-        let balance: cw20::BalanceResponse = app
-            .wrap()
-            .query_wasm_smart(
-                &cw20_addr,
-                &cw20::Cw20QueryMsg::Balance {
-                    address: recipient.to_string(),
-                },
-            )
-            .unwrap();
-        assert_eq!(balance.balance, Uint128::new(1234));
     }
 }
-
