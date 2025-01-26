@@ -86,7 +86,17 @@ junod-docker q wasm codes
 
 #### On Xion
 ```bash
-# Deploy Voice
+# Deploy Proxy
+xiond-docker tx wasm store /root/.xiond/artifacts/polytone_proxy-aarch64.wasm \
+--from xion-0 \
+--gas auto \
+--gas-adjustment 2 \
+--gas-prices 0.01uxion \
+-y
+```
+
+```bash
+# Deploy Voice & Confirm Code-Ids
 xiond-docker tx wasm store /root/.xiond/artifacts/polytone_voice-aarch64.wasm \
 --from xion-0 \
 --gas auto \
@@ -109,9 +119,9 @@ junod-docker q wasm list-contract-by-code 1
 
 #### Instantiate Voice on Xion
 ```bash
-xiond-docker tx wasm instantiate 1 \
+xiond-docker tx wasm instantiate 2 \
 '{
-  "proxy_code_id":"2",
+  "proxy_code_id":"1",
   "block_max_gas":"2000000"
 }' \
 --label "polytone_voice" \
@@ -120,7 +130,7 @@ xiond-docker tx wasm instantiate 1 \
 --from xion-0
 
 # Query voice address
-xiond-docker q wasm list-contract-by-code 1
+xiond-docker q wasm list-contract-by-code 2
 ```
 
 #### Create Channels
@@ -130,7 +140,7 @@ hermes create channel \
   --a-chain       localjuno-1 \
   --a-connection  connection-0 \
   --a-port        "wasm.juno14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9skjuwg8" \
-  --b-port        "wasm.xion14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9s0zg3xc" \
+  --b-port        "wasm.xion1wug8sewp6cedgkmrmvhl3lf3tulagm9hnvy8p0rppz9yjw0g4wtqhn6wsj" \
   --channel-version polytone-1
 
 # Verify channels
@@ -248,16 +258,26 @@ juno17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgszu8fr9 \
 
 ### 9. Setup Merged Token on Xion
 ```bash
-# Instantiate Merged Token
+# Instantiate Merged Token - THIS IS WRONG BECAUSE THE MINTER IS SET AS THE VOICE CONTRACT, BUT IT WILL BE CALLED BY THE PROXY CONTARACT
 xiond-docker tx wasm instantiate 3 '{
   "name": "Fusogen Merged Token",
   "symbol": "FMRGT",
   "decimals": 6,
   "initial_balances": [],
   "mint": {
-    "minter": "xion14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9s0zg3xc",
+    "minter": "xion1wug8sewp6cedgkmrmvhl3lf3tulagm9hnvy8p0rppz9yjw0g4wtqhn6wsj",
     "cap": null
   },
+  "marketing": null
+}' --label "Merged Token" --from xion-0 --no-admin -y --gas-adjustment 2 --gas-prices 0.01uxion
+
+# Instantiate CW20 with no minter (anyone can mint)
+xiond-docker tx wasm instantiate 3 '{
+  "name": "Fusogen Merged Token",
+  "symbol": "FMRGa",
+  "decimals": 6,
+  "initial_balances": [],
+  "mint": null,
   "marketing": null
 }' --label "Merged Token" --from xion-0 --no-admin -y --gas-adjustment 2 --gas-prices 0.01uxion
 
@@ -305,3 +325,15 @@ xiond-docker q wasm contract-state smart xion1qg5ega6dykkxc307y25pecuufrjkxkaggk
   }
 }'
 ```
+
+TODO - GO THROUGH AND UNDERSTAND PROXY CONTRACT, BUILD YOUR OWN WASMS
+
+NOTES - OK THIS IS HORRIBLY BROKEN - THERE ARE TWO THINGS GOING ON, MAYBE
+
+- VOICE CALLS PROXY TO EXECUTE FUNCTIONS ON THE TETHERED CW20 CONTRACT SO THE ADDRESS THE 
+XION CW20 CONTRACT SEES DOES NOT MATCH WHAT WAS BEING STORED AS THE MINTER, THE VOICE ADDR
+- I THINK THERE NEEDS TO BE A HANDLER CONTRACT ON THE XION - IT IS INITIATED FROM JUNO AND STORES THE INITIATOR
+THEN THE INITIATOR CAN TRIGGER MINTS TO SPECIFIED ADDRESSES ON THE XION SIDE. THAT WAY THE RELATIONSHIP WILL 
+HOLD AMONGST ALL THE ADDRESSES, I HTINK
+
+- ANOTHER THING TO CHECK IS WHETHER THE JUNO SIDE CONTRACT IS ACTUALLY HANDLIGN TOKEN RECEIPTION CORRECTLY
