@@ -35,7 +35,5 @@ node_modules/
 .DS_Store
 
 # CosmWasm artifacts
-artifacts/
-**/artifacts/
 schema/
 **/schema/
