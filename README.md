@@ -20,7 +20,7 @@ go version go1.23.2 darwin/arm64
 cargo 1.83.0 (5ffbef321 2024-10-29)
 ```
 
-### Docker
+### Docker - Note:: Docker Desktop is a much clunkier experience and not recommended
 ```bash
 Docker version 27.3.1, build ce12230
 ```
@@ -52,7 +52,7 @@ Or just `cd` if you're already in the root of the project:
 cd local-ic-config
 ```
 
-### 2. Create the ICTEST_HOME_PATH path variable
+### 2. Create the ICTEST_HOME_PATH path variable - you can move it to .bahsrc if you would like for it to persist
 
 ```bash
 export ICTEST_HOME_PATH=$(pwd)
@@ -81,7 +81,7 @@ The local demo draws heavily from the [polytone-workshop](https://github.com/kin
 
 Here are the steps to run the `fusogen-xion-inter`demo once you have the dependencies installed (NOTE: addresses should be deterministic):
 
-### 1. Launch Local-IC
+### 1. Launch Local-IC - may take a moment
 ```bash
 ICTEST_HOME=${ICTEST_HOME_PATH} local-ic start juno_hub_custom.json
 ```
@@ -93,7 +93,7 @@ curl -s http://127.0.0.1:26157/status | jq .result.sync_info.latest_block_height
 curl -s http://127.0.0.1:26057/status | jq .result.sync_info.latest_block_height
 ```
 
-### 3. Set Docker Image CLI Aliases - these will make executing the demo commands easier
+### 3. Set Docker Image CLI Aliases - these will make executing the demo commands easier, but may need to be redeclared in new terminals
 ```bash
 # Juno Docker alias
 alias junod-docker="docker run --rm --network host \
