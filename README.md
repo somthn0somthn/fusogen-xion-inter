@@ -66,6 +66,13 @@ The Hermes file contained in the repo is configured to bridge local xion and jun
 cp ${ICTEST_HOME_PATH}/hermes/config.toml ~/.hermes/config.toml
 ```
 
+### 4. Setup Hermes keys
+
+```bash
+hermes keys add --key-name relayer_key_chain1 --chain localjuno-1 --mnemonic-file ${ICTEST_HOME_PATH}/mnemonic1.txt
+hermes keys add --key-name relayer_key_chain2 --chain localxion-1 --mnemonic-file ${ICTEST_HOME_PATH}/mnemonic2.txt
+```
+
 ## Running the demo
 
 You can run the mocked test by navigating to `juno-merger` and running `cargo test`.
