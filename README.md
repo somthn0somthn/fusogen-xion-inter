@@ -131,6 +131,9 @@ xiond-docker tx wasm instantiate 2 \
 
 # Query voice address
 xiond-docker q wasm list-contract-by-code 2
+
+# Query proxy address - shouldn't be instantiated yet
+xiond-docker q wasm list-contract-by-code 1
 ```
 
 #### Create Channels
@@ -163,6 +166,13 @@ junod-docker q wasm codes
 #### On Xion
 ```bash
 xiond-docker tx wasm store /root/.xiond/artifacts/cw20_base.wasm \
+--from xion-0 \
+--gas auto \
+--gas-adjustment 2 \
+--gas-prices 0.01uxion \
+-y
+
+xiond-docker tx wasm store /root/.xiond/artifacts/xion_minter.wasm \
 --from xion-0 \
 --gas auto \
 --gas-adjustment 2 \
@@ -258,31 +268,31 @@ juno17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgszu8fr9 \
 
 ### 9. Setup Merged Token on Xion
 ```bash
-# Instantiate Merged Token - THIS IS WRONG BECAUSE THE MINTER IS SET AS THE VOICE CONTRACT, BUT IT WILL BE CALLED BY THE PROXY CONTARACT
-xiond-docker tx wasm instantiate 3 '{
-  "name": "Fusogen Merged Token",
-  "symbol": "FMRGT",
-  "decimals": 6,
-  "initial_balances": [],
-  "mint": {
-    "minter": "xion1wug8sewp6cedgkmrmvhl3lf3tulagm9hnvy8p0rppz9yjw0g4wtqhn6wsj",
-    "cap": null
-  },
-  "marketing": null
-}' --label "Merged Token" --from xion-0 --no-admin -y --gas-adjustment 2 --gas-prices 0.01uxion
+# Instantiate xion-minter passing the code_id for cw20 base, which is 3 in this case
 
-# Instantiate CW20 with no minter (anyone can mint)
-xiond-docker tx wasm instantiate 3 '{
-  "name": "Fusogen Merged Token",
-  "symbol": "FMRGa",
-  "decimals": 6,
-  "initial_balances": [],
-  "mint": null,
-  "marketing": null
-}' --label "Merged Token" --from xion-0 --no-admin -y --gas-adjustment 2 --gas-prices 0.01uxion
+xiond-docker tx wasm instantiate 4 '{
+  "token_name": "Fusogen Merged Token",
+  "token_symbol": "FMRGT",
+  "token_decimals": 6,
+  "cw20_code_id": 3
+}' \
+--label "Merged Token" \
+--from xion-0 \
+--no-admin \
+-y \
+--gas-adjustment 2 \
+--gas-prices 0.01uxion \
+--gas auto
+
 
 # Query mint contract address
-xiond-docker q wasm list-contract-by-code 3
+xiond-docker q wasm list-contract-by-code 4
+
+# Query the minter config using instantiated address - record the cw20 address
+xiond-docker query wasm contract-state smart xion1wkwy0xh89ksdgj9hr347dyd2dw7zesmtrue6kfzyml4vdtz6e5wsx90sn0 '{
+  "get_config": {}
+}' --output json
+
 ```
 
 ### 10. Setup Juno-Merger Contract
@@ -292,7 +302,7 @@ junod-docker tx wasm instantiate 4 '{
   "note_contract": "juno14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9skjuwg8",
   "token_a": "juno1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3seew7v3",
   "token_b": "juno17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgszu8fr9",
-  "xion_mint_contract": "xion1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3sqf6pzw"
+  "xion_mint_contract": "xion1wkwy0xh89ksdgj9hr347dyd2dw7zesmtrue6kfzyml4vdtz6e5wsx90sn0"
 }' --label "juno-merger" --from acc1 --no-admin -y --gas-adjustment 1.3 --gas auto
 
 # Query code ID
@@ -318,22 +328,40 @@ junod-docker tx wasm execute juno1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyh
   }
 }' --from acc1 --gas-adjustment 1.3 --gas auto -y
 
-# Check balance
-xiond-docker q wasm contract-state smart xion1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3sqf6pzw '{
+# Check balance on Xion meta account
+xiond-docker q wasm contract-state smart xion17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgsmvnkd6 '{
   "balance": {
     "address": "xion1h495zmkgm92664jfnc80n9p64xs5xf56qrg4vc"  
   }
 }'
+
+# Check Token A balance on Juno
+junod-docker q wasm contract-state smart \
+juno1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3seew7v3 \
+'{
+  "balance": {
+    "address": "juno1hj5fveer5cjtn4wd6wstzugjfdxzl0xps73ftl"
+  }
+}'
 ```
 
-TODO - GO THROUGH AND UNDERSTAND PROXY CONTRACT, BUILD YOUR OWN WASMS
+### 13. For secondary accounts
 
-NOTES - OK THIS IS HORRIBLY BROKEN - THERE ARE TWO THINGS GOING ON, MAYBE
+```bash
+echo -n '{"lock":{"xion_meta_account":"xion1sudtvm9y8xpgfnkmlrd4r9x56h5vg06rp9aed0"}}' | base64
 
-- VOICE CALLS PROXY TO EXECUTE FUNCTIONS ON THE TETHERED CW20 CONTRACT SO THE ADDRESS THE 
-XION CW20 CONTRACT SEES DOES NOT MATCH WHAT WAS BEING STORED AS THE MINTER, THE VOICE ADDR
-- I THINK THERE NEEDS TO BE A HANDLER CONTRACT ON THE XION - IT IS INITIATED FROM JUNO AND STORES THE INITIATOR
-THEN THE INITIATOR CAN TRIGGER MINTS TO SPECIFIED ADDRESSES ON THE XION SIDE. THAT WAY THE RELATIONSHIP WILL 
-HOLD AMONGST ALL THE ADDRESSES, I HTINK
+junod-docker tx wasm execute juno17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgszu8fr9 '{
+  "send": {
+    "contract": "juno1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrq722sry",
+    "amount": "5678",
+    "msg": "eyJsb2NrIjp7Inhpb25fbWV0YV9hY2NvdW50IjoieGlvbjFzdWR0dm05eTh4cGdmbmttbHJkNHI5eDU2aDV2ZzA2cnA5YWVkMCJ9fQ=="
+  }
+}' --from acc2 --gas-adjustment 1.3 --gas auto -y
 
-- ANOTHER THING TO CHECK IS WHETHER THE JUNO SIDE CONTRACT IS ACTUALLY HANDLIGN TOKEN RECEIPTION CORRECTLY
+xiond-docker q wasm contract-state smart xion17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgsmvnkd6 '{
+  "balance": {
+    "address": "xion1sudtvm9y8xpgfnkmlrd4r9x56h5vg06rp9aed0"  
+  }
+}'
+
+```

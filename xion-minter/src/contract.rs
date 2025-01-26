@@ -1,23 +1,22 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::{
-    entry_point, to_json_binary, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response,
+    entry_point, to_json_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Reply, Response,
     StdResult, SubMsg, Uint128, WasmMsg,
 };
 
 //use cw2::set_contract_version;
-use cw20; // Add this for MinterResponse
-use cw20_base; // Add this for InstantiateMsg
+use cw20;
+use cw20_base;
 
 use crate::error::ContractError;
 use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{Config, CONFIG}; // TODO: do i need to instantiate this in the instantiated fun
+use crate::state::{Config, CONFIG};
 
-//version info for migration info 
+//version info for migration info
 //const CONTRACT_NAME: &str = "crates.io:xion-minter";
 //const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub const INSTANTIATE_TOKEN_REPLY_ID: u64 = 1; //I think this effectively functions as an enum
-                                               //pub const CW20_ID: u64 = 42; //TODO move this to a .env file
+pub const INSTANTIATE_TOKEN_REPLY_ID: u64 = 1;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -27,7 +26,7 @@ pub fn instantiate(
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     //set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-    
+
     //this calls a separate contract hence why you have to make
     //a separate InstantiateMsg call
     let cw20_msg = cw20_base::msg::InstantiateMsg {
@@ -57,7 +56,7 @@ pub fn instantiate(
     CONFIG.save(
         deps.storage,
         &Config {
-            minter: info.sender.clone(),
+            minter: None,
             token_contract: None,
         },
     )?;
@@ -124,21 +123,31 @@ fn mint_tokens(
     amount: Uint128,
     recipient: Option<String>,
 ) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
+    let mut config = CONFIG.load(deps.storage)?;
+
+    match config.minter {
+        None => {
+            // First mint attempt - this address becomes the permanent minter
+            config.minter = Some(info.sender.clone());
+            CONFIG.save(deps.storage, &config.clone())?;
+        }
+        Some(minter) => {
+            // Minter is already set - verify sender has minting rights
+            if info.sender != minter {
+                return Err(ContractError::Unauthorized {});
+            }
+        }
+    }
+
     let token_addr = config
         .token_contract
         .ok_or(ContractError::NoContractAddress {})?;
-
-    if info.sender != config.minter {
-        return Err(ContractError::Unauthorized {});
-    }
 
     if amount.is_zero() {
         return Err(ContractError::InvalidAmount {});
     }
 
     let final_recipient = match recipient {
-        //TODO : validate address
         Some(addr) => deps.api.addr_validate(&addr)?,
         None => deps.api.addr_validate(&info.sender.to_string())?,
     };
@@ -168,9 +177,162 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::GetConfig {} => {
             let config = CONFIG.load(deps.storage)?;
             to_json_binary(&ConfigResponse {
-                minter: config.minter.into_string(),
+                minter: config.minter.map(|a| a.into_string()),
                 token_contract: config.token_contract.map(|a| a.into_string()),
             })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cosmwasm_std::Empty;
+    use cw_multi_test::{App, Contract, ContractWrapper, Executor, IntoAddr};
+
+    fn contract_xion_minter() -> Box<dyn Contract<Empty>> {
+        let contract = ContractWrapper::new(execute, instantiate, query).with_reply(reply);
+        Box::new(contract)
+    }
+
+    fn contract_cw20_base() -> Box<dyn Contract<Empty>> {
+        let contract = ContractWrapper::new(
+            cw20_base::contract::execute,
+            cw20_base::contract::instantiate,
+            cw20_base::contract::query,
+        );
+        Box::new(contract)
+    }
+
+    fn setup_app() -> (App, Addr, Addr, u64) {
+        let mut app = App::default();
+
+        let cw20_code_id = app.store_code(contract_cw20_base());
+        let minter_code_id = app.store_code(contract_xion_minter());
+
+        let minter = "the_minter".into_addr();
+
+        let minter_init_msg = InstantiateMsg {
+            token_name: "Merger Token".to_string(),
+            token_symbol: "MTKN".to_string(),
+            token_decimals: 6,
+            cw20_code_id: cw20_code_id,
+        };
+
+        let minter_addr = app
+            .instantiate_contract(
+                minter_code_id,
+                minter.clone(),
+                &minter_init_msg,
+                &[],
+                "Xion Minter",
+                None,
+            )
+            .unwrap();
+
+        (app, minter, minter_addr, cw20_code_id)
+    }
+
+    #[test]
+    fn test_minter_instantiates_cw20() {
+        let (mut app, minter, minter_addr, _) = setup_app();
+
+        let config_resp: ConfigResponse = app
+            .wrap()
+            .query_wasm_smart(&minter_addr, &QueryMsg::GetConfig {})
+            .unwrap();
+
+        assert_eq!(config_resp.minter, None);
+
+        let cw20_addr = config_resp.token_contract.expect("No Contract address set");
+
+        let token_info: cw20::TokenInfoResponse = app
+            .wrap()
+            .query_wasm_smart(&cw20_addr, &cw20::Cw20QueryMsg::TokenInfo {})
+            .unwrap();
+
+        assert_eq!(token_info.name, "Merger Token");
+        assert_eq!(token_info.symbol, "MTKN");
+        assert_eq!(token_info.decimals, 6);
+    }
+
+    #[test]
+    fn test_mint_tokens() {
+        let (mut app, minter, minter_addr, _) = setup_app();
+
+        let recipient = "recipient1".into_addr();
+
+        // Test successful mint by minter
+        let mint_msg = ExecuteMsg::Mint {
+            amount: Uint128::new(1000),
+            recipient: Some(recipient.to_string()),
+        };
+        app.execute_contract(minter.clone(), minter_addr.clone(), &mint_msg, &[])
+            .unwrap();
+
+        let config_resp: ConfigResponse = app
+            .wrap()
+            .query_wasm_smart(&minter_addr, &QueryMsg::GetConfig {})
+            .unwrap();
+
+        let cw20_addr = config_resp.token_contract.expect("No Contract address set");
+
+        let balance: cw20::BalanceResponse = app
+            .wrap()
+            .query_wasm_smart(
+                &cw20_addr,
+                &cw20::Cw20QueryMsg::Balance {
+                    address: recipient.to_string(),
+                },
+            )
+            .unwrap();
+        assert_eq!(balance.balance, Uint128::new(1000));
+        assert_eq!(config_resp.minter.unwrap(), minter.into_string());
+    }
+
+    #[test]
+    fn test_unauthorized_mint() {
+        let (mut app, _, minter, _) = setup_app();
+        let unauthorized = "unauthorized".into_addr();
+        let recipient = "recipient1".into_addr();
+
+        let mint_msg = ExecuteMsg::Mint {
+            amount: Uint128::new(1000),
+            recipient: Some(recipient.to_string()),
+        };
+
+        app.execute_contract(minter.clone(), minter.clone(), &mint_msg, &[])
+            .unwrap();
+
+        // Test mint failure from unauthorized address
+        let err = app
+            .execute_contract(unauthorized, minter.clone(), &mint_msg, &[])
+            .unwrap_err();
+
+        match err.downcast::<ContractError>().unwrap() {
+            ContractError::Unauthorized {} => {}
+            e => panic!("unexpected error: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_zero_amount_mint() {
+        let (mut app, minter, minter_addr, _) = setup_app();
+        let recipient = "recipient1".into_addr();
+
+        let mint_msg = ExecuteMsg::Mint {
+            amount: Uint128::zero(),
+            recipient: Some(recipient.to_string()),
+        };
+
+        // Test mint failure with zero amount
+        let err = app
+            .execute_contract(minter, minter_addr.clone(), &mint_msg, &[])
+            .unwrap_err();
+
+        match err.downcast::<ContractError>().unwrap() {
+            ContractError::InvalidAmount {} => {}
+            e => panic!("unexpected error: {}", e),
         }
     }
 }

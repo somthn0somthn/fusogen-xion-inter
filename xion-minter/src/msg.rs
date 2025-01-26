@@ -28,6 +28,6 @@ pub enum QueryMsg {
 
 #[cw_serde]
 pub struct ConfigResponse {
-    pub minter: String,
+    pub minter: Option<String>,
     pub token_contract: Option<String>,
 }
