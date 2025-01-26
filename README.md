@@ -190,7 +190,7 @@ hermes create channel \
 
 # If there is an Error message, you may need to manually kill other conflicting instances of hermes.
 
-ps aus | grep hermes
+ps aux | grep hermes
 kill <hermes pid>
 
 # Verify channels
