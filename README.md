@@ -2,7 +2,9 @@
 
 Fusogen is a platform designed to facilitate mergers and acquisitions (M&A) like actions for decentralized autonomous organizations (DAOs). As decentralized communities and blockchain-based entities grow, there is a growing need for DAOs to consolidate resources, collaborate, and merge effectively—much like traditional businesses. However, DAOs operate under different rules, relying on smart contracts and decentralized governance, so traditional M&A processes don't apply. Fusogen addresses this gap by providing a framework to streamline the merging of DAOs, allowing them to combine assets, governance structures, and treasuries in a secure and automated manner. Simply put, Fusogen faciliates fair and secure value sharing across communities as they grow and evolve.
 
-Fusogen began life in the Solana Colosseum and aims to be a cross-chain solution enabling greater interoperability. You can see the Solana POC here: https://www.fusogen.io/
+This proof of concept demonstration is the first step towards migrating communities to XION. This is ideal, because once on XION meta-accounts can be used for improved user experiences and account control, and even allow users to harness XION as a control chain for activities occuring elsewhere in the Cosmos ecosystem. Fusogen's roadmap supports migrating governance structures as well as a fluid and flexible M&A processes that merging communities can tailor to their own needs.
+
+Fusogen began life in the Solana Colosseum and aims to be a cross-chain solution enabling greater interoperability across major blockchains such as Solana, XION, and other notable chains. Fusogen's roadmaps also aims to bridge Solana to XION and/or the Cosmos ecosystem. You can see the Solana POC here: https://www.fusogen.io/
 
 ## Prerequisites
 
@@ -28,16 +30,49 @@ Docker version 27.3.1, build ce12230
 local-ic version v8.8.0
 ```
 
+`local-ic` installation directions are [here](https://github.com/strangelove-ventures/interchaintest/tree/main/local-interchain).
+
 ### Hermes
 ```bash
 hermes 1.10.4
 ```
 
+Hermes insatllation directions are [here](https://hermes.informal.systems/quick-start/installation.html).
+
 ## Setup Instructions
+
+### 1. Clone this repo and navigate to the local-ic-config directory.
+```bash
+cd <project-path>/local-ic-config
+```
+
+Or just `cd` if you're already in the root of the project:
+
+```bash
+cd local-ic-config
+```
+
+### 2. Create the ICTEST_HOME_PATH path variable
+
+```bash
+export ICTEST_HOME_PATH=$(pwd)
+```
+
+### 3. Copy the Hermes config file to your local machine
+
+The Hermes file contained in the repo is configured to bridge local xion and juno nodes. You'll need to copy it to your local Hermes directory, which is typically `~/.hermes`. You'll need to alter the following command if your setup is different and copy the config wherever Hermes looks for its `config.toml` file.
+
+```bash
+cp ${ICTEST_HOME_PATH}/hermes/config.toml ~/.hermes/config.toml
+```
+
+## Running the demo
 
 You can run the mocked test by navigating to `juno-merger` and running `cargo test`.
 
-The local demo draws heavily from the [polytone-workshop](https://github.com/kintsugi-tech/polytone-workshop/) relying on a modified docker container for Xion and a few other tweaks. Here are the steps to run the demo once you have the dependencies installed (addresses should be deterministic):
+The local demo draws heavily from the [polytone-workshop](https://github.com/kintsugi-tech/polytone-workshop/) relying on a modified docker container for Xion and a few other tweaks. Polytone is a fantastic contract suite for interchain interactions, and the `polytone-workshop` serves as a fantastic introduction. If you are new to Polytone or cross-chain activities on Cosmos chains, this tutorial is very informative and highly recommended. Check it out & follow the project!
+
+Here are the steps to run the `fusogen-xion-inter`demo once you have the dependencies installed (NOTE: addresses should be deterministic):
 
 ### 1. Launch Local-IC
 ```bash
@@ -51,7 +86,7 @@ curl -s http://127.0.0.1:26157/status | jq .result.sync_info.latest_block_height
 curl -s http://127.0.0.1:26057/status | jq .result.sync_info.latest_block_height
 ```
 
-### 3. Set Docker Image CLI Aliases
+### 3. Set Docker Image CLI Aliases - these will make executing the demo commands easier
 ```bash
 # Juno Docker alias
 alias junod-docker="docker run --rm --network host \
@@ -78,7 +113,7 @@ hermes query connections --chain localxion-1
 
 #### On Juno
 ```bash
-# Deploy Note & Listener
+# Deploy Note & Listener. Verify
 junod-docker tx wasm store /root/.juno/artifacts/polytone_note-aarch64.wasm --from acc1 -y
 junod-docker tx wasm store /root/.juno/artifacts/polytone_listener-aarch64.wasm --from acc1 -y
 junod-docker q wasm codes
@@ -129,10 +164,10 @@ xiond-docker tx wasm instantiate 2 \
 --gas auto --gas-adjustment 2 --gas-prices 0.01uxion \
 --from xion-0
 
-# Query voice address
+# Query voice contract address
 xiond-docker q wasm list-contract-by-code 2
 
-# Query proxy address - shouldn't be instantiated yet
+# Query proxy address - shouldn't be instantiated yet. Proxy instantiations are actually handled automatically under the hood by Voice. So, no action is required here - we're just running a check to be thorough.
 xiond-docker q wasm list-contract-by-code 1
 ```
 
@@ -149,13 +184,13 @@ hermes create channel \
 # If there is an Error message, you may need to manually kill other conflicting instances of hermes.
 
 ps aus | grep hermes
-kill <pid>
+kill <hermes pid>
 
 # Verify channels
 hermes query channels --chain localjuno-1
 hermes query channels --chain localxion-1
 
-# Start Hermes
+# Start Hermes - leave running
 hermes start
 ```
 
@@ -273,7 +308,7 @@ juno17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgszu8fr9 \
 
 ### 9. Setup Merged Token on Xion
 ```bash
-# Instantiate xion-minter passing the code_id for cw20 base, which is 3 in this case
+# Instantiate xion-minter passing the code_id for cw20 base on XION, which is 3 in this case
 
 xiond-docker tx wasm instantiate 4 '{
   "token_name": "Fusogen Merged Token",
@@ -293,7 +328,7 @@ xiond-docker tx wasm instantiate 4 '{
 # Query mint contract address
 xiond-docker q wasm list-contract-by-code 4
 
-# Query the minter config using instantiated address - record the cw20 address
+# Query the minter config using instantiated address - record the token_contract address
 xiond-docker query wasm contract-state smart xion1wkwy0xh89ksdgj9hr347dyd2dw7zesmtrue6kfzyml4vdtz6e5wsx90sn0 '{
   "get_config": {}
 }' --output json
@@ -317,14 +352,14 @@ junod-docker q wasm list-contract-by-code 4
 junod-docker q wasm contract-state smart juno1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrq722sry '{"get_config":{}}'
 ```
 
-### 11. Get Base64 Encoded Value
+### 11. Get Base64 Encoded Value. This is the msg value for executing the merger transaction
 ```bash
 echo -n '{"lock":{"xion_meta_account":"xion1h495zmkgm92664jfnc80n9p64xs5xf56qrg4vc"}}' | base64
 ```
 
 ### 12. Execute Token Transactions
 ```bash
-# Send transaction from Token A contract - allow a moment for xchain tx to complete
+# Send transaction from Token A contract - allow a moment for the cross-chain transaction to complete
 junod-docker tx wasm execute juno1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3seew7v3 '{
   "send": {
     "contract": "juno1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrq722sry",
@@ -350,7 +385,7 @@ juno1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3seew7v3 \
 }'
 ```
 
-### 13. For secondary accounts
+### 13. For secondary accounts - again allow a moment for the cross-chain transaction to complete
 
 ```bash
 echo -n '{"lock":{"xion_meta_account":"xion1sudtvm9y8xpgfnkmlrd4r9x56h5vg06rp9aed0"}}' | base64
@@ -377,5 +412,8 @@ juno17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgszu8fr9 \
     "address": "juno1efd63aw40lxf3n4mhf7dzhjkr453axurv2zdzk"
   }
 }'
-
 ```
+## References
+- [Polytone Workshop](https://github.com/kintsugi-tech/polytone-workshop/)
+- [Hermes Documentation](https://hermes.informal.systems/)
+- [Local Interchain Documentation](https://github.com/strangelove-ventures/interchaintest)
