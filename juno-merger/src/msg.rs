@@ -35,6 +35,14 @@ pub enum QueryMsg {
 }
 
 #[cw_serde]
+pub struct ConfigResponse {
+    pub note_contract: String,      
+    pub token_a: String,           
+    pub token_b: String,           
+    pub xion_mint_contract: String, 
+}
+
+#[cw_serde]
 pub enum PolytoneExecuteMsg {
     Execute {
         msgs: Vec<CosmosMsg<Empty>>,

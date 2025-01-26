@@ -46,7 +46,7 @@ ICTEST_HOME=${ICTEST_HOME_PATH} local-ic start juno_hub_custom.json
 
 ### 2. Verify Local-IC
 ```bash
-# Check block heights
+# In a separate terminal, check block heights
 curl -s http://127.0.0.1:26157/status | jq .result.sync_info.latest_block_height
 curl -s http://127.0.0.1:26057/status | jq .result.sync_info.latest_block_height
 ```
@@ -66,7 +66,7 @@ alias xiond-docker="docker run --rm --network host \
 
 ### 4. Create Hermes Connections
 ```bash
-# Create connection (performs handshake - may take a while)
+# Create connection (performs handshake - may take a moment)
 hermes create connection --a-chain localjuno-1 --b-chain localxion-1
 
 # Verify connections
@@ -86,7 +86,17 @@ junod-docker q wasm codes
 
 #### On Xion
 ```bash
-# Deploy Voice
+# Deploy Proxy
+xiond-docker tx wasm store /root/.xiond/artifacts/polytone_proxy-aarch64.wasm \
+--from xion-0 \
+--gas auto \
+--gas-adjustment 2 \
+--gas-prices 0.01uxion \
+-y
+```
+
+```bash
+# Deploy Voice & Confirm Code-Ids
 xiond-docker tx wasm store /root/.xiond/artifacts/polytone_voice-aarch64.wasm \
 --from xion-0 \
 --gas auto \
@@ -109,9 +119,9 @@ junod-docker q wasm list-contract-by-code 1
 
 #### Instantiate Voice on Xion
 ```bash
-xiond-docker tx wasm instantiate 1 \
+xiond-docker tx wasm instantiate 2 \
 '{
-  "proxy_code_id":"2",
+  "proxy_code_id":"1",
   "block_max_gas":"2000000"
 }' \
 --label "polytone_voice" \
@@ -120,18 +130,26 @@ xiond-docker tx wasm instantiate 1 \
 --from xion-0
 
 # Query voice address
+xiond-docker q wasm list-contract-by-code 2
+
+# Query proxy address - shouldn't be instantiated yet
 xiond-docker q wasm list-contract-by-code 1
 ```
 
 #### Create Channels
 ```bash
-# Create channel (takes ~1 minute)
+# Create channel (takes ~1 minute). 
 hermes create channel \
   --a-chain       localjuno-1 \
   --a-connection  connection-0 \
   --a-port        "wasm.juno14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9skjuwg8" \
-  --b-port        "wasm.xion14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9s0zg3xc" \
+  --b-port        "wasm.xion1wug8sewp6cedgkmrmvhl3lf3tulagm9hnvy8p0rppz9yjw0g4wtqhn6wsj" \
   --channel-version polytone-1
+
+# If there is an Error message, you may need to manually kill other conflicting instances of hermes.
+
+ps aus | grep hermes
+kill <pid>
 
 # Verify channels
 hermes query channels --chain localjuno-1
@@ -143,7 +161,7 @@ hermes start
 
 ### 7. Store Additional Contracts
 
-#### On Juno
+#### On Juno, in a new terminal
 ```bash
 junod-docker tx wasm store /root/.juno/artifacts/cw20_base.wasm --from acc1 -y
 junod-docker tx wasm store /root/.juno/artifacts/juno_merger.wasm --from acc1 -y
@@ -153,6 +171,13 @@ junod-docker q wasm codes
 #### On Xion
 ```bash
 xiond-docker tx wasm store /root/.xiond/artifacts/cw20_base.wasm \
+--from xion-0 \
+--gas auto \
+--gas-adjustment 2 \
+--gas-prices 0.01uxion \
+-y
+
+xiond-docker tx wasm store /root/.xiond/artifacts/xion_minter.wasm \
 --from xion-0 \
 --gas auto \
 --gas-adjustment 2 \
@@ -248,21 +273,31 @@ juno17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgszu8fr9 \
 
 ### 9. Setup Merged Token on Xion
 ```bash
-# Instantiate Merged Token
-xiond-docker tx wasm instantiate 3 '{
-  "name": "Fusogen Merged Token",
-  "symbol": "FMRGT",
-  "decimals": 6,
-  "initial_balances": [],
-  "mint": {
-    "minter": "xion14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9s0zg3xc",
-    "cap": null
-  },
-  "marketing": null
-}' --label "Merged Token" --from xion-0 --no-admin -y --gas-adjustment 2 --gas-prices 0.01uxion
+# Instantiate xion-minter passing the code_id for cw20 base, which is 3 in this case
+
+xiond-docker tx wasm instantiate 4 '{
+  "token_name": "Fusogen Merged Token",
+  "token_symbol": "FMRGT",
+  "token_decimals": 6,
+  "cw20_code_id": 3
+}' \
+--label "Merged Token" \
+--from xion-0 \
+--no-admin \
+-y \
+--gas-adjustment 2 \
+--gas-prices 0.01uxion \
+--gas auto
+
 
 # Query mint contract address
-xiond-docker q wasm list-contract-by-code 3
+xiond-docker q wasm list-contract-by-code 4
+
+# Query the minter config using instantiated address - record the cw20 address
+xiond-docker query wasm contract-state smart xion1wkwy0xh89ksdgj9hr347dyd2dw7zesmtrue6kfzyml4vdtz6e5wsx90sn0 '{
+  "get_config": {}
+}' --output json
+
 ```
 
 ### 10. Setup Juno-Merger Contract
@@ -272,13 +307,13 @@ junod-docker tx wasm instantiate 4 '{
   "note_contract": "juno14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9skjuwg8",
   "token_a": "juno1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3seew7v3",
   "token_b": "juno17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgszu8fr9",
-  "xion_mint_contract": "xion1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3sqf6pzw"
+  "xion_mint_contract": "xion1wkwy0xh89ksdgj9hr347dyd2dw7zesmtrue6kfzyml4vdtz6e5wsx90sn0"
 }' --label "juno-merger" --from acc1 --no-admin -y --gas-adjustment 1.3 --gas auto
 
 # Query code ID
 junod-docker q wasm list-contract-by-code 4
 
-# Confirm Xion minter config
+# Confirm Juno merger config
 junod-docker q wasm contract-state smart juno1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrq722sry '{"get_config":{}}'
 ```
 
@@ -289,7 +324,7 @@ echo -n '{"lock":{"xion_meta_account":"xion1h495zmkgm92664jfnc80n9p64xs5xf56qrg4
 
 ### 12. Execute Token Transactions
 ```bash
-# Send transaction from Token A contract
+# Send transaction from Token A contract - allow a moment for xchain tx to complete
 junod-docker tx wasm execute juno1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3seew7v3 '{
   "send": {
     "contract": "juno1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrq722sry",
@@ -298,10 +333,49 @@ junod-docker tx wasm execute juno1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyh
   }
 }' --from acc1 --gas-adjustment 1.3 --gas auto -y
 
-# Check balance
-xiond-docker q wasm contract-state smart xion1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3sqf6pzw '{
+# Check balance on Xion meta account
+xiond-docker q wasm contract-state smart xion17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgsmvnkd6 '{
   "balance": {
     "address": "xion1h495zmkgm92664jfnc80n9p64xs5xf56qrg4vc"  
   }
 }'
+
+# Check Token A balance on Juno
+junod-docker q wasm contract-state smart \
+juno1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3seew7v3 \
+'{
+  "balance": {
+    "address": "juno1hj5fveer5cjtn4wd6wstzugjfdxzl0xps73ftl"
+  }
+}'
+```
+
+### 13. For secondary accounts
+
+```bash
+echo -n '{"lock":{"xion_meta_account":"xion1sudtvm9y8xpgfnkmlrd4r9x56h5vg06rp9aed0"}}' | base64
+
+junod-docker tx wasm execute juno17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgszu8fr9 '{
+  "send": {
+    "contract": "juno1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrq722sry",
+    "amount": "5678",
+    "msg": "eyJsb2NrIjp7Inhpb25fbWV0YV9hY2NvdW50IjoieGlvbjFzdWR0dm05eTh4cGdmbmttbHJkNHI5eDU2aDV2ZzA2cnA5YWVkMCJ9fQ=="
+  }
+}' --from acc2 --gas-adjustment 1.3 --gas auto -y
+
+xiond-docker q wasm contract-state smart xion17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgsmvnkd6 '{
+  "balance": {
+    "address": "xion1sudtvm9y8xpgfnkmlrd4r9x56h5vg06rp9aed0"  
+  }
+}'
+
+# Check Token B balance decreased
+junod-docker q wasm contract-state smart \
+juno17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgszu8fr9 \
+'{
+  "balance": {
+    "address": "juno1efd63aw40lxf3n4mhf7dzhjkr453axurv2zdzk"
+  }
+}'
+
 ```

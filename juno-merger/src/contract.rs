@@ -8,7 +8,7 @@ use base64;
 use serde_json::json;
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, PolytoneExecuteMsg, QueryMsg, ReceiveMsg};
+use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, PolytoneExecuteMsg, QueryMsg, ReceiveMsg};
 use crate::state::{Config, CONFIG};
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -111,7 +111,15 @@ pub fn receive_cw20(
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetConfig {} => to_json_binary(&CONFIG.load(deps.storage)?),
+        QueryMsg::GetConfig {} => {
+            let config = CONFIG.load(deps.storage)?;
+            to_json_binary(&ConfigResponse {
+                note_contract: config.note_contract.into_string(),
+                token_a: config.token_a.into_string(),
+                token_b: config.token_b.into_string(),
+                xion_mint_contract: config.xion_mint_contract,
+            })
+        }
     }
 }
 
