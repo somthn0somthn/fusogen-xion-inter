@@ -46,7 +46,7 @@ ICTEST_HOME=${ICTEST_HOME_PATH} local-ic start juno_hub_custom.json
 
 ### 2. Verify Local-IC
 ```bash
-# Check block heights
+# In a separate terminal, check block heights
 curl -s http://127.0.0.1:26157/status | jq .result.sync_info.latest_block_height
 curl -s http://127.0.0.1:26057/status | jq .result.sync_info.latest_block_height
 ```
@@ -66,7 +66,7 @@ alias xiond-docker="docker run --rm --network host \
 
 ### 4. Create Hermes Connections
 ```bash
-# Create connection (performs handshake - may take a while)
+# Create connection (performs handshake - may take a moment)
 hermes create connection --a-chain localjuno-1 --b-chain localxion-1
 
 # Verify connections
@@ -138,13 +138,18 @@ xiond-docker q wasm list-contract-by-code 1
 
 #### Create Channels
 ```bash
-# Create channel (takes ~1 minute)
+# Create channel (takes ~1 minute). 
 hermes create channel \
   --a-chain       localjuno-1 \
   --a-connection  connection-0 \
   --a-port        "wasm.juno14hj2tavq8fpesdwxxcu44rty3hh90vhujrvcmstl4zr3txmfvw9skjuwg8" \
   --b-port        "wasm.xion1wug8sewp6cedgkmrmvhl3lf3tulagm9hnvy8p0rppz9yjw0g4wtqhn6wsj" \
   --channel-version polytone-1
+
+# If there is an Error message, you may need to manually kill other conflicting instances of hermes.
+
+ps aus | grep hermes
+kill <pid>
 
 # Verify channels
 hermes query channels --chain localjuno-1
@@ -156,7 +161,7 @@ hermes start
 
 ### 7. Store Additional Contracts
 
-#### On Juno
+#### On Juno, in a new terminal
 ```bash
 junod-docker tx wasm store /root/.juno/artifacts/cw20_base.wasm --from acc1 -y
 junod-docker tx wasm store /root/.juno/artifacts/juno_merger.wasm --from acc1 -y
@@ -308,7 +313,7 @@ junod-docker tx wasm instantiate 4 '{
 # Query code ID
 junod-docker q wasm list-contract-by-code 4
 
-# Confirm Xion minter config
+# Confirm Juno merger config
 junod-docker q wasm contract-state smart juno1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrq722sry '{"get_config":{}}'
 ```
 
@@ -319,7 +324,7 @@ echo -n '{"lock":{"xion_meta_account":"xion1h495zmkgm92664jfnc80n9p64xs5xf56qrg4
 
 ### 12. Execute Token Transactions
 ```bash
-# Send transaction from Token A contract
+# Send transaction from Token A contract - allow a moment for xchain tx to complete
 junod-docker tx wasm execute juno1qg5ega6dykkxc307y25pecuufrjkxkaggkkxh7nad0vhyhtuhw3seew7v3 '{
   "send": {
     "contract": "juno1ghd753shjuwexxywmgs4xz7x2q732vcnkm6h2pyv9s6ah3hylvrq722sry",
