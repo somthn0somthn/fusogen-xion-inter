@@ -364,4 +364,13 @@ xiond-docker q wasm contract-state smart xion17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jf
   }
 }'
 
+# Check Token B balance decreased
+junod-docker q wasm contract-state smart \
+juno17p9rzwnnfxcjp32un9ug7yhhzgtkhvl9jfksztgw5uh69wac2pgszu8fr9 \
+'{
+  "balance": {
+    "address": "juno1efd63aw40lxf3n4mhf7dzhjkr453axurv2zdzk"
+  }
+}'
+
 ```
